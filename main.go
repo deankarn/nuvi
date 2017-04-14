@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -12,6 +13,8 @@ import (
 	"sort"
 	"time"
 
+	"sync"
+
 	"github.com/go-redis/redis"
 )
 
@@ -19,6 +22,7 @@ const (
 	url          = "http://bitly.com/nuvi-plz"
 	xmlList      = "NEWS_XML"
 	xmlLatestKey = "NEWS_XML_LATEST"
+	maxDownloads = 5
 )
 
 var (
@@ -64,7 +68,10 @@ func main() {
 		os.Exit(0)
 	}
 
-	posts := downloadFiles(hrefs)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	posts := downloadParallel(ctx, maxDownloads, hrefs)
 
 	save(client, posts)
 
@@ -97,33 +104,9 @@ func save(client *redis.Client, posts chan *fileDocuments) {
 		if err == redis.TxFailedErr {
 			log.Fatal(err)
 		}
+
+		fmt.Println("Saved:", post.filename)
 	}
-}
-
-func downloadFiles(hrefs []fileDownload) (posts chan *fileDocuments) {
-
-	fmt.Println("Begin downloading files...")
-
-	posts = make(chan *fileDocuments)
-
-	go func() {
-
-		defer close(posts)
-
-		for i := 0; i < len(hrefs); i++ {
-
-			xmlContents, err := download(hrefs[i])
-			if err != nil {
-				// save to DB for retry later
-				log.Println(err)
-			}
-
-			posts <- xmlContents
-		}
-
-	}()
-
-	return
 }
 
 func download(df fileDownload) (*fileDocuments, error) {
@@ -175,6 +158,8 @@ func download(df fileDownload) (*fileDocuments, error) {
 		files = append(files, string(b))
 	}
 
+	fmt.Println("Download Complete for ", df.filename)
+
 	return &fileDocuments{filename: df.filename, documents: files}, nil
 }
 
@@ -207,9 +192,6 @@ func getPosts() ([]fileDownload, error) {
 		return nil, nil
 	}
 
-	// just for testing
-	hrefs = hrefs[:1]
-
 	results := make([]fileDownload, 0, len(hrefs))
 	finalURL := resp.Request.URL.String() // grabbing final URL just in case there were redirects during Get
 
@@ -229,7 +211,130 @@ func getPosts() ([]fileDownload, error) {
 		return results[i].filename < results[j].filename
 	})
 
-	fmt.Println("Complete")
+	fmt.Println("Complete", len(results))
 
 	return results, nil
+}
+
+// downloadPrallel downloads files in parallel to a max of the 'maxDownload' property at a time
+// additionally a backlog for FIFO logic has been implemented so that the files will still be saved
+// to the database in cronological order regardless of the order the downloads complete.
+func downloadParallel(ctx context.Context, maxDownloads uint, files []fileDownload) (ch chan *fileDocuments) {
+
+	ch = make(chan *fileDocuments)
+
+	dlChan := make(chan fileDownload)
+
+	go func() {
+
+		defer close(dlChan)
+
+		for _, file := range files {
+			select {
+			case <-ctx.Done():
+				return
+			case dlChan <- file:
+			}
+		}
+	}()
+
+	idx := 0
+	backlog := make(map[int]*fileDocuments)
+	m := sync.Mutex{}
+	wg := sync.WaitGroup{}
+	wg.Add(int(maxDownloads))
+
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	for i := 0; i < int(maxDownloads); i++ {
+		go func() {
+
+			defer wg.Done()
+
+			for {
+
+				m.Lock()
+
+				for {
+					if file, ok := backlog[idx]; ok {
+
+						select {
+						case <-ctx.Done():
+							return
+						case ch <- file:
+							delete(backlog, idx)
+							idx++
+							continue
+						}
+					}
+
+					break
+				}
+
+				m.Unlock()
+
+				select {
+				case <-ctx.Done():
+					return
+				case dl := <-dlChan:
+
+					// when closing dlChan an
+					// empty entry can be consumed
+					if len(dl.url) == 0 {
+						break
+					}
+
+					var file *fileDocuments
+					var err error
+
+					// try and download 3 times, just in case of connections interuption
+					j := 0
+					for {
+
+						if j == 3 {
+							log.Fatal(err)
+						}
+
+						file, err = download(dl)
+						if err != nil {
+							j++
+							continue
+						}
+
+						break
+					}
+
+					m.Lock()
+
+					if file.filename != files[idx].filename {
+
+						// find idx of file
+						for i := 0; i < len(files); i++ {
+							if files[i].filename == file.filename {
+								backlog[i] = file
+								break
+							}
+						}
+
+						m.Unlock()
+						continue
+					}
+
+					idx++
+
+					m.Unlock()
+
+					ch <- file
+					continue
+				}
+
+				break
+			}
+		}()
+	}
+
+	return ch
 }
