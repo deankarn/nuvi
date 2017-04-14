@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"fmt"
 	"io/ioutil"
 	stdlog "log"
 	"net/http"
@@ -59,7 +58,7 @@ func main() {
 		latest = cmd.Val()
 	}
 
-	fmt.Println("LATEST:", latest)
+	log.Println("LATEST:", latest)
 
 	hrefs, err := getPosts(downloadSite)
 	if err != nil {
@@ -78,7 +77,7 @@ func main() {
 
 	save(client, posts)
 
-	fmt.Println(time.Now().Sub(start))
+	log.Println(time.Now().Sub(start))
 }
 
 func save(client *redis.Client, posts chan *fileDocuments) {
