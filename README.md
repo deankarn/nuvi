@@ -17,3 +17,7 @@ Without know the context what kind of machine this will eventually run on and ho
 Some additional features implemented
 
 - Tunable parallel downloading of .zip files but maintains FIFO to maintain list order.
+
+## TO DO
+
+- Create generic parallel download library for use in multiple projects.
