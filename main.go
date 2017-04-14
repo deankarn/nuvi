@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
-	"log"
+	stdlog "log"
 	"net/http"
 	"os"
 	"regexp"
@@ -15,11 +15,13 @@ import (
 
 	"sync"
 
+	"strings"
+
 	"github.com/go-redis/redis"
 )
 
 const (
-	url          = "http://bitly.com/nuvi-plz"
+	downloadSite = "http://bitly.com/nuvi-plz"
 	xmlList      = "NEWS_XML"
 	xmlLatestKey = "NEWS_XML_LATEST"
 	maxDownloads = 5
@@ -29,6 +31,7 @@ var (
 	timeout   = time.Second * 5
 	hrefRegex = regexp.MustCompile(`href="(.+\.zip)"`)
 	latest    = ""
+	log       = stdlog.New(os.Stdout, "", stdlog.Ldate|stdlog.Ltime|stdlog.Lshortfile)
 )
 
 type fileDocuments struct {
@@ -58,7 +61,7 @@ func main() {
 
 	fmt.Println("LATEST:", latest)
 
-	hrefs, err := getPosts()
+	hrefs, err := getPosts(downloadSite)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -105,13 +108,13 @@ func save(client *redis.Client, posts chan *fileDocuments) {
 			log.Fatal(err)
 		}
 
-		fmt.Println("Saved:", post.filename)
+		log.Println("Saved:", post.filename)
 	}
 }
 
 func download(df fileDownload) (*fileDocuments, error) {
 
-	fmt.Println("Downloading file ", df.url)
+	log.Println("Downloading file ", df.url)
 
 	res, err := http.Get(df.url)
 	if err != nil {
@@ -158,14 +161,14 @@ func download(df fileDownload) (*fileDocuments, error) {
 		files = append(files, string(b))
 	}
 
-	fmt.Println("Download Complete for ", df.filename)
+	log.Println("Download Complete for ", df.filename)
 
 	return &fileDocuments{filename: df.filename, documents: files}, nil
 }
 
-func getPosts() ([]fileDownload, error) {
+func getPosts(url string) ([]fileDownload, error) {
 
-	fmt.Print("Retrieving Posts...")
+	log.Print("Retrieving Posts...")
 
 	client := http.Client{
 		Timeout: timeout,
@@ -193,7 +196,7 @@ func getPosts() ([]fileDownload, error) {
 	}
 
 	results := make([]fileDownload, 0, len(hrefs))
-	finalURL := resp.Request.URL.String() // grabbing final URL just in case there were redirects during Get
+	finalURL := strings.TrimRight(resp.Request.URL.String(), "/") + "/" // grabbing final URL just in case there were redirects during Get
 
 	for _, matches := range hrefs {
 
@@ -211,7 +214,7 @@ func getPosts() ([]fileDownload, error) {
 		return results[i].filename < results[j].filename
 	})
 
-	fmt.Println("Complete", len(results))
+	log.Println("Complete", len(results))
 
 	return results, nil
 }
