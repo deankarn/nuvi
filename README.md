@@ -6,6 +6,9 @@ nuvi assignment
 go get -u github.com/joeybloggs/nuvi
 ```
 
+## DB 
+This connects to a Redis database running at localhost:6379 with no password and database 0.
+
 ## Requirements
 - [x] Download all zip files from given URL
 - [x] Extract XML files from .zip + publish to Redis list
@@ -25,4 +28,5 @@ Some additional features implemented
 
 ## TO DO
 
+- Make Redis DB information configurage via flags + ENV variables.
 - Create generic parallel download library for use in multiple projects.
