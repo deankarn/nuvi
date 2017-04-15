@@ -1,6 +1,11 @@
 # nuvi
 nuvi assignment
 
+## Installation
+```shell
+go get -u github.com/joeybloggs/nuvi
+```
+
 ## Requirements
 - [x] Download all zip files from given URL
 - [x] Extract XML files from .zip + publish to Redis list
