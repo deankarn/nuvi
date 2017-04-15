@@ -16,21 +16,24 @@ import (
 
 	"strings"
 
+	"net/url"
+
 	"github.com/go-redis/redis"
+	"github.com/namsral/flag" // checks flags + ENV variables
 )
 
 const (
-	downloadSite = "http://bitly.com/nuvi-plz"
 	xmlList      = "NEWS_XML"
 	xmlLatestKey = "NEWS_XML_LATEST"
-	maxDownloads = 5
 )
 
 var (
-	timeout   = time.Second * 5
-	hrefRegex = regexp.MustCompile(`href="(.+\.zip)"`)
-	latest    = ""
-	log       = stdlog.New(os.Stdout, "", stdlog.Ldate|stdlog.Ltime|stdlog.Lshortfile)
+	downloadSite string
+	maxDownloads int
+	timeout      = time.Second * 5
+	hrefRegex    = regexp.MustCompile(`href="(.+\.zip)"`)
+	latest       = ""
+	log          = stdlog.New(os.Stdout, "", stdlog.Ldate|stdlog.Ltime|stdlog.Lshortfile)
 )
 
 type fileDocuments struct {
@@ -44,6 +47,19 @@ type fileDownload struct {
 }
 
 func main() {
+
+	flag.StringVar(&downloadSite, "url", "http://bitly.com/nuvi-plz", "URL to dowload files from")
+	flag.IntVar(&maxDownloads, "maxdownloads", 5, "Maximum parallel downloads")
+	flag.Parse()
+
+	if maxDownloads < 1 {
+		log.Fatal("Must specify at least one download.")
+	}
+
+	_, err := url.Parse(downloadSite)
+	if err != nil {
+		log.Fatalf("Invalid url specified '%s'", downloadSite)
+	}
 
 	start := time.Now()
 
@@ -73,7 +89,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	posts := downloadParallel(ctx, maxDownloads, hrefs)
+	posts := downloadParallel(ctx, uint(maxDownloads), hrefs)
 
 	save(client, posts)
 
