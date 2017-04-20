@@ -86,10 +86,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	// ctx, cancel := context.WithCancel(context.Background())
-	// defer cancel()
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*2)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	posts := downloadParallel(ctx, uint(maxDownloads), hrefs)
