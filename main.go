@@ -10,15 +10,15 @@ import (
 	"os"
 	"regexp"
 	"sort"
-	"time"
-
 	"sync"
+	"time"
 
 	"strings"
 
 	"net/url"
 
 	"github.com/go-redis/redis"
+	download "github.com/joeybloggs/go-download"
 	"github.com/namsral/flag" // checks flags + ENV variables
 )
 
@@ -49,7 +49,7 @@ type fileDownload struct {
 func main() {
 
 	flag.StringVar(&downloadSite, "url", "http://bitly.com/nuvi-plz", "URL to dowload files from")
-	flag.IntVar(&maxDownloads, "maxdownloads", 5, "Maximum parallel downloads")
+	flag.IntVar(&maxDownloads, "maxdownloads", 2, "Maximum parallel downloads")
 	flag.Parse()
 
 	if maxDownloads < 1 {
@@ -86,7 +86,10 @@ func main() {
 		os.Exit(0)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// ctx, cancel := context.WithCancel(context.Background())
+	// defer cancel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*2)
 	defer cancel()
 
 	posts := downloadParallel(ctx, uint(maxDownloads), hrefs)
@@ -127,24 +130,32 @@ func save(client *redis.Client, posts chan *fileDocuments) {
 	}
 }
 
-func download(df fileDownload) (*fileDocuments, error) {
+func downloadFile(df fileDownload) (*fileDocuments, error) {
 
 	log.Println("Downloading file ", df.url)
 
-	res, err := http.Get(df.url)
+	options := &download.Options{
+		Concurrency: func(size int64) int {
+			return 20
+		},
+	}
+
+	f, err := download.Open(df.url, options)
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer f.Close()
 
 	// wish I could just feed res.Body into unzip
 	// but can't the way zip works. If we don't have
 	// this much memory available write zip to disk
-	allXML, err := ioutil.ReadAll(res.Body)
+	allXML, err := ioutil.ReadAll(f)
 	if err != nil {
 		return nil, err
 	}
 
+	// fi, _ := f.Stat()
+	// fmt.Println("LEN:", df.url, len(allXML), fi.Size())
 	zipReader, err := zip.NewReader(bytes.NewReader(allXML), int64(len(allXML)))
 	if err != nil {
 		return nil, err
@@ -240,7 +251,6 @@ func getPosts(url string) ([]fileDownload, error) {
 func downloadParallel(ctx context.Context, maxDownloads uint, files []fileDownload) (ch chan *fileDocuments) {
 
 	ch = make(chan *fileDocuments)
-
 	dlChan := make(chan fileDownload)
 
 	go func() {
@@ -316,7 +326,7 @@ func downloadParallel(ctx context.Context, maxDownloads uint, files []fileDownlo
 							log.Fatal(err)
 						}
 
-						file, err = download(dl)
+						file, err = downloadFile(dl)
 						if err != nil {
 							j++
 							continue

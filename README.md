@@ -18,7 +18,6 @@ This connects to a Redis database running at localhost:6379 with no password and
 Without know the context what kind of machine this will eventually run on and how the Redis list will be consumed the following assumptions were made.
 
 - Raw XML was stored in Redis instead of compressed to save space.
-- Application built for pure speed. eg. all operations done in memory avoiding hard disk bottlenecks, but consumes more memory.
 - The XML added to the list in descending order, by .zip creation time, for direct read to display use.
 
 ## Additional Features
